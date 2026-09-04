@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+	<title>Orb Thief</title>
+	<!--
+		Orb Thief's web shell (docs/web.md). Replaces Godot's default page,
+		which shows the boot splash blown up to the window over a slate-blue
+		field and a chunky native <progress> bar.
+
+		This one is BLACK and has nothing on it but a hairline bar. The game
+		fades up from black on its own, so the load reads as one continuous
+		fade instead of a splash, a flash of slate, and then the game.
+
+		Everything is inline: the export copies this single file and nothing
+		else, so a stylesheet would be a second request that 404s.
+
+		$GODOT_* are the export's substitutions — PROJECT_NAME, HEAD_INCLUDE,
+		URL, CONFIG and THREADS_ENABLED. SPLASH, SPLASH_CLASSES and
+		SPLASH_COLOR are deliberately unused: there is no splash here.
+	-->
+	<style>
+		html, body, #canvas { margin: 0; padding: 0; border: 0; }
+
+		body {
+			background: #000;
+			color: #fff;
+			overflow: hidden;
+			touch-action: none;
+			font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+		}
+
+		#canvas { display: block; }
+		#canvas:focus { outline: none; }
+
+		/* The whole loading screen. Removed outright once the game starts. */
+		#status {
+			position: absolute;
+			inset: 0;
+			background: #000;
+			display: flex;
+			flex-direction: column;
+			justify-content: center;
+			align-items: center;
+			gap: 22px;
+		}
+
+		/* The only thing on the page: a thin rounded track that fills white. */
+		#bar {
+			width: 260px;
+			max-width: 60vw;
+			height: 3px;
+			border-radius: 999px;
+			background: rgba(255, 255, 255, 0.16);
+			overflow: hidden;
+		}
+
+		#bar > i {
+			display: block;
+			width: 0%;
+			height: 100%;
+			border-radius: 999px;
+			background: #fff;
+			transition: width 0.18s linear;
+		}
+
+		/* An indeterminate load (no Content-Length) sweeps instead of filling,
+		   so a slow first byte still looks alive rather than stuck at zero. */
+		#bar.unknown > i {
+			width: 34%;
+			transition: none;
+			animation: sweep 1.1s ease-in-out infinite;
+		}
+
+		@keyframes sweep {
+			0%   { transform: translateX(-110%); }
+			100% { transform: translateX(320%); }
+		}
+
+		/* Failures only. A black screen with no explanation is not a loading
+		   screen, it is a bug report nobody can file. */
+		#phase {
+			margin-top: 14px;
+			font: 400 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif;
+			letter-spacing: 0.08em;
+			text-transform: lowercase;
+			color: rgba(255, 255, 255, 0.55);
+			text-align: center;
+		}
+
+		#notice {
+			display: none;
+			max-width: 30rem;
+			margin: 0 2rem;
+			text-align: center;
+			color: rgba(255, 255, 255, 0.75);
+			white-space: pre-wrap;
+		}
+	</style>
+	<!-- The favicon and the apple-touch icon arrive with the head include; a
+	     hand-written <link> here only duplicates them (and index.js is the
+	     .js file, not the stem, so it points at index.js.icon.png). -->
+	<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
+<link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
+
+</head>
+<body>
+	<canvas id="canvas">Your browser does not support the canvas tag.</canvas>
+	<noscript>Your browser does not support JavaScript.</noscript>
+
+	<div id="status">
+		<div id="bar" class="unknown"><i></i></div>
+		<div id="phase">Connecting</div>
+		<div id="notice"></div>
+	</div>
+
+	<script>
+		// Keep a handle on every AudioContext the engine makes, BEFORE the
+		// engine loads and makes one. A browser starts them suspended and only
+		// a call from inside a real user-gesture handler may resume them;
+		// ui/web_gate.gd is that handler, and this array is how it reaches
+		// them, since Godot's own handle is buried in the emscripten module.
+		(function () {
+			const AC = window.AudioContext || window.webkitAudioContext;
+			if (!AC) {
+				return;
+			}
+			window.__ORB_CTXS = [];
+			class TrackedAudioContext extends AC {
+				constructor(...args) {
+					super(...args);
+					window.__ORB_CTXS.push(this);
+				}
+			}
+			window.AudioContext = TrackedAudioContext;
+			if (window.webkitAudioContext) {
+				window.webkitAudioContext = TrackedAudioContext;
+			}
+		}());
+
+		// Resume from a REAL DOM gesture, not from Godot. Going through the
+		// engine means the resume call happens after Godot has processed the
+		// input, by which point the browser may no longer treat us as being
+		// inside a user gesture, and the context stays suspended forever
+		// (observed on the live site: "The AudioContext was not allowed to
+		// start"). These listeners are capture-phase, so the canvas cannot
+		// swallow them first, and they unhook once every context is running.
+		(function () {
+			const EVENTS = ['pointerdown', 'touchstart', 'touchend', 'mousedown', 'keydown', 'click'];
+			function resumeAll() {
+				const ctxs = window.__ORB_CTXS || [];
+				let suspended = 0;
+				for (let i = 0; i < ctxs.length; i++) {
+					if (ctxs[i].state === 'suspended') {
+						suspended++;
+						ctxs[i].resume().catch(function () {});
+					}
+				}
+				if (ctxs.length > 0 && suspended === 0) {
+					for (let i = 0; i < EVENTS.length; i++) {
+						document.removeEventListener(EVENTS[i], resumeAll, true);
+					}
+				}
+			}
+			for (let i = 0; i < EVENTS.length; i++) {
+				document.addEventListener(EVENTS[i], resumeAll, true);
+			}
+		}());
+	</script>
+
+	<script src="index.js"></script>
+	<script>
+		const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","mainPack":"index.pck?v=8176c35e","experimentalVK":false,"fileSizes":{"index.pck":9337268,"index.wasm":37700666},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+		const GODOT_THREADS_ENABLED = false;
+		const engine = new Engine(GODOT_CONFIG);
+
+		(function () {
+			const status = document.getElementById('status');
+			const bar = document.getElementById('bar');
+			const fill = bar.firstElementChild;
+			const notice = document.getElementById('notice');
+
+			function fail(err) {
+				console.error(err);
+				bar.style.display = 'none';
+				notice.style.display = 'block';
+				notice.textContent = (err && err.message) || String(err) || 'An unknown error occurred.';
+			}
+
+			const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+			if (missing.length !== 0) {
+				fail('This browser is missing:\n' + missing.join('\n'));
+				return;
+			}
+
+			// Status text tracks what is ACTUALLY happening. The download is the
+			// only phase with a real percentage; the engine start after it has no
+			// progress to report, so it says so rather than faking a crawling bar.
+			const phase = document.getElementById('phase');
+			let downloading = false;
+
+			engine.startGame({
+				onProgress: function (current, total) {
+					if (current > 0 && total > 0) {
+						bar.classList.remove('unknown');
+						fill.style.width = (100 * current / total) + '%';
+						const mb = (total / 1048576).toFixed(0);
+						phase.textContent = 'downloading ' + Math.round(100 * current / total) + '% of ' + mb + ' mb';
+						downloading = true;
+						if (current >= total) {
+							phase.textContent = 'starting the engine';
+						}
+					} else {
+						bar.classList.add('unknown');
+						phase.textContent = downloading ? 'starting the engine' : 'loading the engine';
+					}
+				},
+			}).then(function () {
+				phase.textContent = 'entering the canyon';
+				status.remove();
+			}, fail);
+		}());
+	</script>
+</body>
+</html>
+
